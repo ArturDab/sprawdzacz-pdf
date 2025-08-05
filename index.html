@@ -9,6 +9,8 @@
     <!-- Biblioteki do manipulacji PDF i ZIP -->
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Biblioteka do renderowania miniaturek PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .drop-zone { border: 2px dashed #cbd5e1; }
@@ -32,7 +34,6 @@
             color: inherit;
             word-break: break-all;
         }
-        /* Prosty i niezawodny styl dla zmodyfikowanej komórki */
         .cell-modified {
             background-color: #f0fdf4; /* Jasnozielone tło */
         }
@@ -82,6 +83,7 @@
     <script>
         window.addEventListener('load', () => {
             const { PDFDocument, PDFName, PDFString } = PDFLib;
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
 
             let loadedFiles = [];
 
@@ -111,6 +113,23 @@
                 }
             }
 
+            async function generateThumbnail(fileBytes) {
+                try {
+                    const pdf = await pdfjsLib.getDocument({ data: fileBytes }).promise;
+                    const page = await pdf.getPage(1);
+                    const viewport = page.getViewport({ scale: 0.2 });
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+                    return canvas.toDataURL('image/jpeg', 0.5);
+                } catch (error) {
+                    console.error("Błąd podczas generowania miniaturki:", error);
+                    return 'https://placehold.co/100x141/e2e8f0/94a3b8?text=B%C5%82%C4%85d';
+                }
+            }
+
             async function handleFiles(files) {
                 showLoader(`Przetwarzanie ${files.length} plików...`);
                 const pdfFiles = Array.from(files).filter(file => file.type === 'application/pdf');
@@ -123,6 +142,7 @@
                     const fileBytes = await file.arrayBuffer();
                     try {
                         const pdfDoc = await PDFDocument.load(fileBytes, { updateMetadata: false });
+                        const thumbnailUrl = await generateThumbnail(fileBytes.slice(0));
                         const fileLinks = [];
                         const pages = pdfDoc.getPages();
                         for (const page of pages) {
@@ -142,7 +162,7 @@
                             }
                         }
                         if (fileLinks.length > 0) {
-                            newFilesData.push({ name: file.name, pdfDoc, links: fileLinks, history: [] });
+                            newFilesData.push({ name: file.name, pdfDoc, links: fileLinks, history: [], thumbnailUrl });
                         }
                     } catch (error) {
                         console.error(`Błąd podczas przetwarzania pliku ${file.name}:`, error);
@@ -190,8 +210,9 @@
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">Oryginalny Link</th>
-                                        <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">Poprawiony Link (kliknij, aby edytować)</th>
+                                        <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">Podgląd</th>
+                                        <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Oryginalny Link</th>
+                                        <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Poprawiony Link (kliknij, aby edytować)</th>
                                     </tr>
                                 </thead>
                                 <tbody data-tbody-for-file="${fileIndex}" class="bg-white divide-y divide-gray-200"></tbody>
@@ -315,10 +336,16 @@
                 const tableRowsHTML = file.links.map((link, linkIndex) => {
                     const isModified = link.corrected !== link.original;
                     const modifiedClass = isModified ? 'cell-modified' : '';
-                    // Dodano <a> tag do oryginalnego linku
                     const originalLinkHTML = `<a href="${escapeHTML(link.original)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline" title="Otwórz link w nowej karcie">${escapeHTML(link.original)}</a>`;
+                    
+                    let thumbnailCell = '';
+                    if (linkIndex === 0) {
+                        thumbnailCell = `<td class="align-middle" rowspan="${file.links.length}"><img src="${file.thumbnailUrl}" alt="Miniaturka ${escapeHTML(file.name)}" class="w-24 h-auto border border-gray-300 rounded-md shadow-sm mx-auto"></td>`;
+                    }
+
                     return `
                         <tr data-file-index="${fileIndex}" data-link-index="${linkIndex}">
+                            ${thumbnailCell}
                             <td class="text-sm font-mono break-all">${originalLinkHTML}</td>
                             <td class="text-sm font-mono break-all editable-cell ${modifiedClass}">
                                 <div class="editable-cell-content">${escapeHTML(link.corrected)}</div>
