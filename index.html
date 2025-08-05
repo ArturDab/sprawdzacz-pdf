@@ -195,6 +195,7 @@
                     fileSection.className = 'file-section mb-10 border border-gray-300 rounded-xl p-4 shadow-md';
                     fileSection.innerHTML = `
                         <h3 class="text-xl font-bold mb-3 text-gray-800">${escapeHTML(file.name)}</h3>
+                        <div class="utm-warning-container mb-4"></div>
                         <div class="find-replace-local bg-gray-50 p-4 rounded-lg mb-4 border border-gray-200">
                             <div class="flex flex-col sm:flex-row items-center gap-4">
                                 <input type="text" placeholder="Znajdź w tym pliku..." class="find-input-local flex-grow w-full p-2 border rounded-md border-gray-300 focus:ring-1 focus:ring-indigo-500">
@@ -232,6 +233,11 @@
                 if (e.target.classList.contains('undo-btn')) {
                     const fileIndex = e.target.dataset.fileIndex;
                     handleUndoForFile(fileIndex);
+                }
+                if (e.target.classList.contains('select-utm-btn')) {
+                    const fileIndex = e.target.dataset.fileIndex;
+                    const utm = e.target.dataset.utm;
+                    handleSelectUtm(fileIndex, utm);
                 }
                 const cell = e.target.closest('.editable-cell');
                 if (cell) {
@@ -301,6 +307,16 @@
                 updateTableForFile(fileIndex);
             }
 
+            function handleSelectUtm(fileIndex, selectedUtm) {
+                pushToHistory(fileIndex);
+                const file = loadedFiles[fileIndex];
+                file.links.forEach(link => {
+                    const baseUrl = link.corrected.split('?')[0];
+                    link.corrected = baseUrl + selectedUtm;
+                });
+                updateTableForFile(fileIndex);
+            }
+
             function makeCellEditable(cell, fileIndex, linkIndex) {
                 const contentDiv = cell.querySelector('.editable-cell-content');
                 if (!contentDiv) return;
@@ -327,6 +343,45 @@
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); } 
                     else if (e.key === 'Escape') { textarea.value = currentValue; textarea.blur(); }
                 });
+            }
+
+            function getUtmString(url) {
+                const utmIndex = url.indexOf('?utm_');
+                if (utmIndex !== -1) {
+                    return url.substring(utmIndex);
+                }
+                return null;
+            }
+
+            function checkUtmConsistency(fileIndex) {
+                const file = loadedFiles[fileIndex];
+                const warningContainer = filesContainer.querySelector(`.file-section:nth-child(${+fileIndex + 1}) .utm-warning-container`);
+                if (!file || !warningContainer) return;
+
+                const utmSet = new Set();
+                file.links.forEach(link => {
+                    const utm = getUtmString(link.corrected);
+                    if (utm) {
+                        utmSet.add(utm);
+                    }
+                });
+
+                if (utmSet.size > 1) {
+                    const utms = Array.from(utmSet).map(utm => `
+                        <li class="flex items-center justify-between py-1">
+                            <code class="text-xs mr-4">${escapeHTML(utm)}</code>
+                            <button data-file-index="${fileIndex}" data-utm="${escapeHTML(utm)}" class="select-utm-btn bg-green-600 text-white text-xs font-bold py-1 px-2 rounded hover:bg-green-700 transition">Użyj tego zestawu</button>
+                        </li>`).join('');
+                    warningContainer.innerHTML = `
+                        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert">
+                            <p class="font-bold">Błąd spójności UTM</p>
+                            <p>Wykryto wiele różnych zestawów parametrów UTM w tym pliku. Wybierz poprawny, aby ujednolicić wszystkie linki:</p>
+                            <ul class="list-none mt-2">${utms}</ul>
+                        </div>
+                    `;
+                } else {
+                    warningContainer.innerHTML = '';
+                }
             }
             
             function updateTableForFile(fileIndex) {
@@ -358,6 +413,7 @@
                 if(undoBtn) {
                     undoBtn.disabled = file.history.length === 0;
                 }
+                checkUtmConsistency(fileIndex);
             }
 
             generatePdfBtn.addEventListener('click', async () => {
