@@ -162,7 +162,8 @@
                             }
                         }
                         if (fileLinks.length > 0) {
-                            newFilesData.push({ name: file.name, pdfDoc, links: fileLinks, history: [], thumbnailUrl });
+                            const exportName = file.name.replace(/\.pdf$/i, '');
+                            newFilesData.push({ name: file.name, exportName: exportName, pdfDoc, links: fileLinks, history: [], thumbnailUrl });
                         }
                     } catch (error) {
                         console.error(`Błąd podczas przetwarzania pliku ${file.name}:`, error);
@@ -193,9 +194,23 @@
                 loadedFiles.forEach((file, fileIndex) => {
                     const fileSection = document.createElement('div');
                     fileSection.className = 'file-section mb-10 border border-gray-300 rounded-xl p-4 shadow-md';
+                    
+                    const mostCommonUtm = findMostCommonUtm(file.links) || '';
+
                     fileSection.innerHTML = `
-                        <h3 class="text-xl font-bold mb-3 text-gray-800">${escapeHTML(file.name)}</h3>
+                        <div class="flex items-start gap-4 mb-4">
+                            <div class="flex-grow">
+                                <label for="filename-${fileIndex}" class="text-sm font-medium text-gray-700">Nazwa pliku do eksportu:</label>
+                                <input type="text" id="filename-${fileIndex}" data-file-index="${fileIndex}" class="filename-input mt-1 block w-full p-2 border rounded-md border-gray-300 focus:ring-1 focus:ring-indigo-500" value="${escapeHTML(file.exportName)}">
+                            </div>
+                        </div>
                         <div class="utm-warning-container mb-4"></div>
+                        <div class="bg-gray-50 p-4 rounded-lg mb-4 border border-gray-200">
+                            <label for="global-utm-${fileIndex}" class="text-sm font-medium text-gray-700">Globalny edytor UTM dla tego pliku (zmiany na żywo):</label>
+                            <div class="flex items-center gap-2 mt-1">
+                                <input type="text" id="global-utm-${fileIndex}" data-file-index="${fileIndex}" class="global-utm-input text-xs flex-grow w-full p-2 border rounded-md border-gray-300 focus:ring-1 focus:ring-indigo-500" value="${escapeHTML(mostCommonUtm)}">
+                            </div>
+                        </div>
                         <div class="find-replace-local bg-gray-50 p-4 rounded-lg mb-4 border border-gray-200">
                             <div class="flex flex-col sm:flex-row items-center gap-4">
                                 <input type="text" placeholder="Znajdź w tym pliku..." class="find-input-local flex-grow w-full p-2 border rounded-md border-gray-300 focus:ring-1 focus:ring-indigo-500">
@@ -219,6 +234,11 @@
                                 <tbody data-tbody-for-file="${fileIndex}" class="bg-white divide-y divide-gray-200"></tbody>
                             </table>
                         </div>
+                        <div class="mt-4 text-right">
+                            <button data-file-index="${fileIndex}" class="download-single-btn bg-teal-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-teal-700 transition">
+                                Pobierz ten plik
+                            </button>
+                        </div>
                     `;
                     filesContainer.appendChild(fileSection);
                     updateTableForFile(fileIndex);
@@ -239,6 +259,10 @@
                     const utm = e.target.dataset.utm;
                     handleSelectUtm(fileIndex, utm);
                 }
+                if (e.target.classList.contains('download-single-btn')) {
+                    const fileIndex = e.target.dataset.fileIndex;
+                    handleSingleDownload(fileIndex);
+                }
                 const cell = e.target.closest('.editable-cell');
                 if (cell) {
                     const row = cell.closest('tr');
@@ -255,6 +279,30 @@
                     const status = section.querySelector('.replace-status-local');
                     updateMatchCount(fileIndex, e.target.value, status);
                 }
+                if (e.target.classList.contains('filename-input')) {
+                    const fileIndex = e.target.dataset.fileIndex;
+                    loadedFiles[fileIndex].exportName = e.target.value;
+                }
+                if (e.target.classList.contains('global-utm-input')) {
+                    const fileIndex = e.target.dataset.fileIndex;
+                    handleGlobalUtmChange(fileIndex, e.target.value);
+                }
+            });
+            
+            filesContainer.addEventListener('focusin', (e) => {
+                if (e.target.classList.contains('global-utm-input')) {
+                    const fileIndex = e.target.dataset.fileIndex;
+                    if (!e.target.hasAttribute('data-history-saved')) {
+                         pushToHistory(fileIndex);
+                         e.target.setAttribute('data-history-saved', 'true');
+                    }
+                }
+            });
+
+            filesContainer.addEventListener('focusout', (e) => {
+                 if (e.target.classList.contains('global-utm-input')) {
+                     e.target.removeAttribute('data-history-saved');
+                 }
             });
 
             function pushToHistory(fileIndex) {
@@ -311,8 +359,21 @@
                 pushToHistory(fileIndex);
                 const file = loadedFiles[fileIndex];
                 file.links.forEach(link => {
-                    const baseUrl = link.corrected.split('?')[0];
-                    link.corrected = baseUrl + selectedUtm;
+                    if (getUtmString(link.original) !== null) {
+                        const baseUrl = link.corrected.split('?')[0];
+                        link.corrected = baseUrl + selectedUtm;
+                    }
+                });
+                updateTableForFile(fileIndex);
+            }
+            
+            function handleGlobalUtmChange(fileIndex, newUtm) {
+                const file = loadedFiles[fileIndex];
+                file.links.forEach(link => {
+                    if (getUtmString(link.original) !== null) {
+                        const baseUrl = link.corrected.split('?')[0];
+                        link.corrected = baseUrl + newUtm;
+                    }
                 });
                 updateTableForFile(fileIndex);
             }
@@ -351,6 +412,23 @@
                     return url.substring(utmIndex);
                 }
                 return null;
+            }
+
+            function findMostCommonUtm(links) {
+                const utmCounts = {};
+                let maxCount = 0;
+                let mostCommon = null;
+                links.forEach(link => {
+                    const utm = getUtmString(link.original);
+                    if (utm) {
+                        utmCounts[utm] = (utmCounts[utm] || 0) + 1;
+                        if (utmCounts[utm] > maxCount) {
+                            maxCount = utmCounts[utm];
+                            mostCommon = utm;
+                        }
+                    }
+                });
+                return mostCommon;
             }
 
             function checkUtmConsistency(fileIndex) {
@@ -416,6 +494,51 @@
                 checkUtmConsistency(fileIndex);
             }
 
+            function ensurePdfExtension(filename) {
+                if (!filename.toLowerCase().endsWith('.pdf')) {
+                    return filename + '.pdf';
+                }
+                return filename;
+            }
+
+            async function generatePdfBytes(file) {
+                file.links.forEach(link => {
+                    if (link.original !== link.corrected) {
+                        const annot = file.pdfDoc.context.lookup(link.annotRef);
+                        if (annot) {
+                            const action = annot.get(PDFName.of('A'));
+                            if (action) action.set(PDFName.of('URI'), PDFString.of(link.corrected));
+                        }
+                    }
+                });
+                return await file.pdfDoc.save();
+            }
+
+            function triggerDownload(blob, filename) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            async function handleSingleDownload(fileIndex) {
+                const file = loadedFiles[fileIndex];
+                showLoader(`Generowanie pliku ${file.name}...`);
+                try {
+                    const newPdfBytes = await generatePdfBytes(file);
+                    const updatedFileName = ensurePdfExtension(file.exportName);
+                    const blob = new Blob([newPdfBytes], { type: 'application/pdf' });
+                    triggerDownload(blob, updatedFileName);
+                    showStatus(`Pobrano plik: ${updatedFileName}`, false);
+                    setTimeout(() => showStatus(''), 3000);
+                } catch (error) {
+                    console.error('Błąd podczas generowania pojedynczego pliku PDF:', error);
+                    showStatus('Wystąpił błąd podczas generowania pliku.', true);
+                }
+            }
+
             generatePdfBtn.addEventListener('click', async () => {
                 if (loadedFiles.length === 0) {
                     showStatus('Błąd: Brak załadowanych plików do przetworzenia.', true);
@@ -429,48 +552,20 @@
                 try {
                     if (loadedFiles.length === 1) {
                         const file = loadedFiles[0];
-                        file.links.forEach(link => {
-                            if (link.original !== link.corrected) {
-                                const annot = file.pdfDoc.context.lookup(link.annotRef);
-                                if (annot) {
-                                    const action = annot.get(PDFName.of('A'));
-                                    if (action) action.set(PDFName.of('URI'), PDFString.of(link.corrected));
-                                }
-                            }
-                        });
-                        const newPdfBytes = await file.pdfDoc.save();
-                        const updatedFileName = file.name.replace(/\.pdf$/i, '_zaktualizowany.pdf');
+                        const newPdfBytes = await generatePdfBytes(file);
+                        const updatedFileName = ensurePdfExtension(file.exportName);
                         const blob = new Blob([newPdfBytes], { type: 'application/pdf' });
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = updatedFileName;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                        triggerDownload(blob, updatedFileName);
                     } 
                     else {
                         const zip = new JSZip();
                         for (const file of loadedFiles) {
-                            file.links.forEach(link => {
-                                if (link.original !== link.corrected) {
-                                    const annot = file.pdfDoc.context.lookup(link.annotRef);
-                                    if (annot) {
-                                        const action = annot.get(PDFName.of('A'));
-                                        if (action) action.set(PDFName.of('URI'), PDFString.of(link.corrected));
-                                    }
-                                }
-                            });
-                            const newPdfBytes = await file.pdfDoc.save();
-                            const updatedFileName = file.name.replace(/\.pdf$/i, '_zaktualizowany.pdf');
+                            const newPdfBytes = await generatePdfBytes(file);
+                            const updatedFileName = ensurePdfExtension(file.exportName);
                             zip.file(updatedFileName, newPdfBytes);
                         }
                         const zipBlob = await zip.generateAsync({ type: 'blob' });
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(zipBlob);
-                        link.download = 'zaktualizowane_pliki_pdf.zip';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                        triggerDownload(zipBlob, 'zaktualizowane_pliki_pdf.zip');
                     }
                     showStatus('Pliki zostały pomyślnie wygenerowane.', false);
                     setTimeout(resetToInitialState, 3000);
